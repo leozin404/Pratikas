@@ -1,0 +1,61 @@
+# Compila o firmware do ESP32-S3 nos servidores do GitHub e gera o .bin
+# Caminho no repositório: .github/workflows/compilar.yml
+
+name: Compilar ESP32-S3
+
+on:
+  push:              # compila sempre que você enviar um arquivo novo
+  workflow_dispatch: # e também pelo botão "Run workflow" na aba Actions
+
+jobs:
+  compilar:
+    runs-on: ubuntu-latest
+
+    env:
+      # Pasta do sketch (o .ino precisa ter o MESMO nome da pasta)
+      SKETCH: firmware/inspecao_caixas_v3
+      # Placa e opções, iguais ao menu Tools da Arduino IDE:
+      #   PSRAM=opi       -> PSRAM: OPI PSRAM
+      #   FlashSize=16M   -> Flash Size: 16MB
+      #   CDCOnBoot=cdc   -> USB CDC On Boot: Enabled  (porta USB nativa)
+      #   CDCOnBoot=default -> Disabled                (porta CH343)
+      FQBN: esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M,CDCOnBoot=cdc
+      CORE_VERSAO: 3.3.12
+
+    steps:
+      - name: Baixar o repositório
+        uses: actions/checkout@v4
+
+      - name: Guardar o núcleo do ESP32 entre execuções (fica mais rápido)
+        uses: actions/cache@v4
+        with:
+          path: ~/.arduino15
+          key: esp32-${{ env.CORE_VERSAO }}
+
+      - name: Instalar arduino-cli
+        uses: arduino/setup-arduino-cli@v2
+
+      - name: Instalar núcleo ESP32
+        run: |
+          arduino-cli config init --overwrite
+          arduino-cli config add board_manager.additional_urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli config set library.enable_unsafe_install true
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32@${{ env.CORE_VERSAO }}
+
+      - name: Instalar biblioteca do Edge Impulse (qualquer .zip na pasta biblioteca/)
+        run: |
+          for z in biblioteca/*.zip; do
+            echo "Instalando $z"
+            arduino-cli lib install --zip-path "$z"
+          done
+
+      - name: Compilar
+        run: |
+          arduino-cli compile --fqbn "$FQBN" --export-binaries "$SKETCH"
+
+      - name: Disponibilizar o .bin para download
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          path: ${{ env.SKETCH }}/build/**/*.merged.bin
